@@ -49,7 +49,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./jenkins/init.groovy:/var/jenkins_home/init.groovy.d/init.groovy
     environment:
-      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false
+      - JAVA_OPTS=-Djenkins.install.runSetupWizard=false -Dhudson.model.DirectoryBrowserSupport.CSP="" -Djenkins.model.JenkinsLocationConfiguration.url=http://localhost:8080/
     networks:
       - devsecops-network
 
@@ -103,18 +103,26 @@ services:
 
   # Monitoring
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.30.0
     container_name: prometheus
-    ports:
-      - "9090:9090"
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
     command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.path=/prometheus
-      - --web.console.libraries=/usr/share/prometheus/console_libraries
-      - --web.console.templates=/usr/share/prometheus/consoles
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    networks:
+      - devsecops-network
+
+  pushgateway:
+    image: prom/pushgateway:v1.4.2
+    container_name: pushgateway
+    ports:
+      - "9091:9091"
     networks:
       - devsecops-network
 

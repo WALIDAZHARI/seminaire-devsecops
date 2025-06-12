@@ -2,9 +2,16 @@ pipeline {
     agent any
     
     environment {
-        DOCKER_REGISTRY = "localhost:5000"
+        // Using Docker Hub registry
+        DOCKER_REGISTRY = "docker.io/walidazhari"
+        // Alternatively for GitHub Container Registry:
+        // DOCKER_REGISTRY = "ghcr.io/walidazhari"
+        
         USER_SERVICE_IMAGE = "${DOCKER_REGISTRY}/user-service:${BUILD_NUMBER}"
         PRODUCT_SERVICE_IMAGE = "${DOCKER_REGISTRY}/product-service:${BUILD_NUMBER}"
+        
+        // Add credentials ID for Docker registry
+        DOCKER_CREDENTIALS_ID = 'docker-credentials'
     }
     
     stages {
@@ -77,23 +84,53 @@ pipeline {
         
         stage('Push Images') {
             steps {
-                sh "docker push ${USER_SERVICE_IMAGE}"
-                sh "docker push ${PRODUCT_SERVICE_IMAGE}"
+                withCredentials([usernamePassword(credentialsId: DOCKER_CREDENTIALS_ID, passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
+                    sh "echo $DOCKER_PASSWORD | docker login -u $DOCKER_USERNAME --password-stdin"
+                    sh "docker push ${USER_SERVICE_IMAGE}"
+                    sh "docker push ${PRODUCT_SERVICE_IMAGE}"
+                    sh "docker logout"
+                }
             }
         }
         
         stage('Deploy to Kubernetes') {
             steps {
-                sh "sed -i 's|{{USER_SERVICE_IMAGE}}|${USER_SERVICE_IMAGE}|g' kubernetes/manifests/user-service-deployment.yaml"
-                sh "sed -i 's|{{PRODUCT_SERVICE_IMAGE}}|${PRODUCT_SERVICE_IMAGE}|g' kubernetes/manifests/product-service-deployment.yaml"
-                sh "kubectl apply -f kubernetes/manifests/"
+                withKubeConfig([credentialsId: 'kubernetes-config']) {
+                    // Create a temporary copy of the manifests to avoid modifying the git-tracked files
+                    sh "mkdir -p kubernetes/temp"
+                    sh "cp kubernetes/manifests/* kubernetes/temp/"
+                    
+                    // Update the image references in the temporary files
+                    sh "sed -i 's|{{USER_SERVICE_IMAGE}}|${USER_SERVICE_IMAGE}|g' kubernetes/temp/user-service-deployment.yaml"
+                    sh "sed -i 's|{{PRODUCT_SERVICE_IMAGE}}|${PRODUCT_SERVICE_IMAGE}|g' kubernetes/temp/product-service-deployment.yaml"
+                    
+                    // Apply the Kubernetes manifests
+                    sh "kubectl apply -f kubernetes/temp/namespace.yaml"
+                    sh "kubectl apply -f kubernetes/temp/ -n devsecops"
+                    
+                    // Clean up temporary files
+                    sh "rm -rf kubernetes/temp"
+                }
             }
         }
         
         stage('DAST with Nuclei') {
             steps {
-                sh "nuclei -target http://user-service:5555 -templates /nuclei-templates/http/"
-                sh "nuclei -target http://product-service:5556 -templates /nuclei-templates/http/"
+                withKubeConfig([credentialsId: 'kubernetes-config']) {
+                    // Wait for services to be ready
+                    sh "kubectl wait --for=condition=available deployment/user-service -n devsecops --timeout=300s"
+                    sh "kubectl wait --for=condition=available deployment/product-service -n devsecops --timeout=300s"
+                    
+                    // Get service URLs
+                    script {
+                        def userServiceUrl = sh(script: "kubectl get svc user-service -n devsecops -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || echo 'user-service'", returnStdout: true).trim()
+                        def productServiceUrl = sh(script: "kubectl get svc product-service -n devsecops -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || echo 'product-service'", returnStdout: true).trim()
+                        
+                        // Run Nuclei scans
+                        sh "nuclei -target http://${userServiceUrl}:5555 -templates /nuclei-templates/http/ -o user-service-nuclei.json -j"
+                        sh "nuclei -target http://${productServiceUrl}:5556 -templates /nuclei-templates/http/ -o product-service-nuclei.json -j"
+                    }
+                }
             }
         }
         
@@ -108,7 +145,27 @@ pipeline {
     post {
         always {
             junit '**/test-results/*.xml'
-            archiveArtifacts artifacts: '*-trivy.json', allowEmptyArchive: true
+            archiveArtifacts artifacts: '*-trivy.json,*-nuclei.json', allowEmptyArchive: true
+            
+            // Send metrics to Prometheus (using Prometheus Pushgateway)
+            script {
+                try {
+                    def buildStatus = currentBuild.result ?: 'SUCCESS'
+                    def buildDuration = currentBuild.duration
+                    
+                    // Example of sending metrics to Prometheus Pushgateway
+                    sh """
+                        echo "# TYPE build_status gauge
+                        # HELP build_status Build status (1 for success, 0 for failure)
+                        build_status{job=\"${JOB_NAME}\", build_number=\"${BUILD_NUMBER}\"} ${buildStatus == 'SUCCESS' ? 1 : 0}
+                        # TYPE build_duration_seconds gauge
+                        # HELP build_duration_seconds Build duration in seconds
+                        build_duration_seconds{job=\"${JOB_NAME}\", build_number=\"${BUILD_NUMBER}\"} ${buildDuration / 1000}" | curl --data-binary @- http://prometheus:9091/metrics/job/jenkins/instance/${JOB_NAME}
+                    """
+                } catch (Exception e) {
+                    echo "Failed to send metrics to Prometheus: ${e.message}"
+                }
+            }
         }
     }
 }
