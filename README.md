@@ -12,56 +12,9 @@ DevSecOps integrates security practices within the DevOps process. It involves i
 
 The project implements a complete DevSecOps pipeline with the following components:
 
-```mermaid
-flowchart TD
-    US[User Service] --> J
-    PS[Product Service] --> J
-    
-    subgraph CI[CI/CD Pipeline]
-        J[Jenkins] --> SQ
-        J --> T
-        J --> DH
-        J --> K
-        J --> N
-    end
-    
-    subgraph SEC[Security Testing]
-        SQ[SonarQube - SAST]
-        T[Trivy - Container Scanning]
-        N[Nuclei - DAST]
-    end
-    
-    DH[Docker Hub]
-    
-    subgraph DEP[Deployment]
-        K[Kubernetes/Minikube] --> USK
-        K --> PSK
-        USK[User Service Pod]
-        PSK[Product Service Pod]
-    end
-    
-    subgraph MON[Monitoring]
-        USK --> P
-        PSK --> P
-        P[Prometheus] --> G[Grafana]
-    end
-    
-    N -.-> USK
-    N -.-> PSK
-    
-    %% Styling
-    classDef source fill:#e1f5fe,stroke:#01579b
-    classDef cicd fill:#fff8e1,stroke:#ff6f00
-    classDef security fill:#ffebee,stroke:#c62828
-    classDef deployment fill:#e8f5e9,stroke:#2e7d32
-    classDef monitoring fill:#ede7f6,stroke:#4527a0
-    
-    class US,PS source
-    class J,CI cicd
-    class SQ,T,N,SEC security
-    class K,USK,PSK,DEP deployment
-    class P,G,MON monitoring
-```
+![DevSecOps Pipeline Architecture](docs/systemArchitecture.png)
+
+> **Note**: The detailed architecture diagram source code is available in [architecture.md](docs/architecture.md).
 
 ### Key Components
 
