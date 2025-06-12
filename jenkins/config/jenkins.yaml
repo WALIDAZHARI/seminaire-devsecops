@@ -1,0 +1,88 @@
+jenkins:
+  systemMessage: "DevSecOps Workshop Jenkins Instance"
+  numExecutors: 2
+  scmCheckoutRetryCount: 3
+  mode: NORMAL
+  
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: admin
+          password: admin
+  
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  
+  clouds:
+    - kubernetes:
+        name: "kubernetes"
+        serverUrl: "https://kubernetes.default.svc.cluster.local"
+        skipTlsVerify: true
+        namespace: "default"
+        jenkinsUrl: "http://jenkins:8080"
+        jenkinsTunnel: "jenkins:50000"
+        templates:
+          - name: "jenkins-agent"
+            namespace: "default"
+            label: "jenkins-agent"
+            containers:
+              - name: "jnlp"
+                image: "jenkins/inbound-agent:latest"
+  
+  globalLibraries:
+    libraries:
+      - name: "shared-library"
+        defaultVersion: "main"
+        retriever:
+          modernSCM:
+            scm:
+              git:
+                remote: "https://github.com/example/jenkins-shared-library.git"
+
+tool:
+  git:
+    installations:
+      - name: "Default"
+        home: "git"
+  
+  maven:
+    installations:
+      - name: "Maven 3"
+        home: "/usr/share/maven"
+  
+  jdk:
+    installations:
+      - name: "JDK 11"
+        home: "/usr/lib/jvm/java-11-openjdk-amd64"
+
+jobs:
+  - script: >
+      pipelineJob('devsecops-pipeline') {
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url('file:///var/jenkins_home/workspace/devsecops-pipeline')
+                }
+                branch('*/main')
+              }
+            }
+            scriptPath('jenkins/Jenkinsfile')
+          }
+        }
+        triggers {
+          scm('H/5 * * * *')
+        }
+      }
+
+unclassified:
+  sonarGlobalConfiguration:
+    buildWrapperEnabled: true
+    installations:
+      - name: "SonarQube"
+        serverUrl: "http://sonarqube:9000"
+        credentialsId: "sonarqube-token"
+        webhookSecretId: "sonarqube-webhook"

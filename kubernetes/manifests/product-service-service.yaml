@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+  namespace: devsecops
+spec:
+  selector:
+    app: product-service
+  ports:
+  - port: 5556
+    targetPort: 5556
+  type: ClusterIP

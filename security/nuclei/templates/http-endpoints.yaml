@@ -1,0 +1,22 @@
+id: http-endpoints-check
+info:
+  name: HTTP Endpoints Security Check
+  author: devsecops-workshop
+  severity: info
+  description: Checks for common security issues in HTTP endpoints
+
+requests:
+  - method: GET
+    path:
+      - "{{BaseURL}}/health"
+      - "{{BaseURL}}/users"
+      - "{{BaseURL}}/products"
+    matchers:
+      - type: status
+        status:
+          - 200
+    extractors:
+      - type: json
+        json:
+          - ".status"
+          - ".service"

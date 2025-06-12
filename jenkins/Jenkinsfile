@@ -1,0 +1,114 @@
+pipeline {
+    agent any
+    
+    environment {
+        DOCKER_REGISTRY = "localhost:5000"
+        USER_SERVICE_IMAGE = "${DOCKER_REGISTRY}/user-service:${BUILD_NUMBER}"
+        PRODUCT_SERVICE_IMAGE = "${DOCKER_REGISTRY}/product-service:${BUILD_NUMBER}"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Build') {
+            parallel {
+                stage('Build User Service') {
+                    steps {
+                        dir('services/user-service') {
+                            sh 'docker build -t ${USER_SERVICE_IMAGE} .'
+                        }
+                    }
+                }
+                stage('Build Product Service') {
+                    steps {
+                        dir('services/product-service') {
+                            sh 'docker build -t ${PRODUCT_SERVICE_IMAGE} .'
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Test') {
+            parallel {
+                stage('Test User Service') {
+                    steps {
+                        dir('services/user-service') {
+                            sh 'pip install -r requirements.txt'
+                            sh 'pytest test_app.py --cov=app'
+                        }
+                    }
+                }
+                stage('Test Product Service') {
+                    steps {
+                        dir('services/product-service') {
+                            sh 'pip install -r requirements.txt'
+                            sh 'pytest test_app.py --cov=app'
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Security Scan') {
+            parallel {
+                stage('SonarQube Analysis') {
+                    steps {
+                        withSonarQubeEnv('SonarQube') {
+                            sh 'sonar-scanner -Dsonar.projectKey=devsecops-demo -Dsonar.sources=.'
+                        }
+                        timeout(time: 10, unit: 'MINUTES') {
+                            waitForQualityGate abortPipeline: true
+                        }
+                    }
+                }
+                stage('Trivy Scan') {
+                    steps {
+                        sh "trivy image ${USER_SERVICE_IMAGE} --format json --output user-service-trivy.json"
+                        sh "trivy image ${PRODUCT_SERVICE_IMAGE} --format json --output product-service-trivy.json"
+                    }
+                }
+            }
+        }
+        
+        stage('Push Images') {
+            steps {
+                sh "docker push ${USER_SERVICE_IMAGE}"
+                sh "docker push ${PRODUCT_SERVICE_IMAGE}"
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh "sed -i 's|{{USER_SERVICE_IMAGE}}|${USER_SERVICE_IMAGE}|g' kubernetes/manifests/user-service-deployment.yaml"
+                sh "sed -i 's|{{PRODUCT_SERVICE_IMAGE}}|${PRODUCT_SERVICE_IMAGE}|g' kubernetes/manifests/product-service-deployment.yaml"
+                sh "kubectl apply -f kubernetes/manifests/"
+            }
+        }
+        
+        stage('DAST with Nuclei') {
+            steps {
+                sh "nuclei -target http://user-service:5555 -templates /nuclei-templates/http/"
+                sh "nuclei -target http://product-service:5556 -templates /nuclei-templates/http/"
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                sh "kubectl get pods"
+                sh "kubectl get services"
+            }
+        }
+    }
+    
+    post {
+        always {
+            junit '**/test-results/*.xml'
+            archiveArtifacts artifacts: '*-trivy.json', allowEmptyArchive: true
+        }
+    }
+}
