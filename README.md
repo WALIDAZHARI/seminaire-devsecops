@@ -12,9 +12,63 @@ DevSecOps integrates security practices within the DevOps process. It involves i
 
 The project implements a complete DevSecOps pipeline with the following components:
 
-![DevSecOps Architecture](docs/architecture.md)
+```mermaid
+graph TD
+    subgraph "Source Code"
+        US[User Service]
+        PS[Product Service]
+    end
 
-For a detailed view of the architecture, see the [architecture diagram](docs/architecture.md).
+    subgraph "CI/CD Pipeline"
+        J[Jenkins]
+        subgraph "Security Testing"
+            SQ[SonarQube - SAST]
+            T[Trivy - Container Scanning]
+            N[Nuclei - DAST]
+        end
+    end
+
+    subgraph "Deployment"
+        K[Kubernetes/Minikube]
+        subgraph "Deployed Services"
+            USK[User Service Pod]
+            PSK[Product Service Pod]
+        end
+    end
+
+    subgraph "Monitoring"
+        P[Prometheus]
+        G[Grafana]
+    end
+
+    US --> J
+    PS --> J
+    J --> SQ
+    J --> T
+    J --> |Build & Push| DH[Docker Hub]
+    DH --> |Pull Images| K
+    J --> |Deploy| K
+    K --> USK
+    K --> PSK
+    J --> N
+    USK --> P
+    PSK --> P
+    P --> G
+    N --> |Test Deployed Apps| USK
+    N --> |Test Deployed Apps| PSK
+    
+    classDef sourceCode fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef cicd fill:#fff8e1,stroke:#ff6f00,stroke-width:2px;
+    classDef security fill:#ffebee,stroke:#c62828,stroke-width:2px;
+    classDef deployment fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    classDef monitoring fill:#ede7f6,stroke:#4527a0,stroke-width:2px;
+    
+    class US,PS sourceCode;
+    class J cicd;
+    class SQ,T,N security;
+    class K,USK,PSK deployment;
+    class P,G monitoring;
+```
 
 ### Key Components
 
